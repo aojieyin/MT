@@ -1,0 +1,63 @@
+common:
+  default_n_jobs: 4
+  chunksize: 200000
+
+steps:
+  # 2) 先做一次严格去重（双语对整体去重）
+  - type: remove_duplicates
+    parameters:
+      inputs:  [News-Commentary.en-zh.en, News-Commentary.en-zh.zh]
+      outputs: [news.dedup.en, news.dedup.zh]
+
+
+  - type: preprocess
+    parameters:
+      inputs:  [news.dedup.en, news.dedup.zh]
+      outputs: [news.pre.en,  news.pre.zh]
+      preprocessors:
+        - RegExpSub:
+            patterns:
+              # 1) HTML entities 还原（&quot; 这类不是 HTML tag，HtmlTagFilter 通常抓不到）
+               - ['&quot;', '"', 0, []]
+               - ['&#34;',  '"', 0, []]
+               - ['&amp;',  '&', 0, []]
+               - ['&lt;',   '<', 0, []]
+               - ['&gt;',   '>', 0, []]
+               - ['&#39;|&apos;', "'", 0, []]
+
+            # 2) 直接删除 URL / Email（替换为空格，避免黏连单词）
+               - ['\\b(?:https?://|www\\.)\\S+', ' ', 0, ["I"]]
+               - ['\\b[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}\\b', ' ', 0, ["I"]]
+
+        - WhitespaceNormalizer: {}
+
+
+  # 3) 硬过滤（把明显噪音踢掉）
+  - type: filter
+    parameters:
+      inputs: [news.pre.en, news.pre.zh]
+      outputs: [news.clean.en, news.clean.zh]
+      filters:
+        - LengthFilter:
+            min_length: [5, 5]
+            max_length: [200, 400]
+            unit: [word, char]   # 英文按 word；中文按 char :contentReference[oaicite:3]{index=3}
+        - LengthRatioFilter:
+            threshold: 5.0
+            unit: char           # 两边都用 char 做长度比更稳 :contentReference[oaicite:4]{index=4}
+        - CharacterScoreFilter:
+            scripts: [Latin, Han]
+            thresholds: [0.80, 0.60]  # 中文混杂拉丁字母时适当放宽 :contentReference[oaicite:6]{index=6}
+        - HtmlTagFilter: {}           # 有 HTML tag 直接踢 :contentReference[oaicite:7]{index=7}
+        - TerminalPunctuationFilter:
+            threshold: -2             # 默认就够用 :contentReference[oaicite:8]{index=8}
+        - NonZeroNumeralsFilter:
+            threshold: 0.5            # 数字序列一致性 :contentReference[oaicite:9]{index=9}
+        - RepetitionFilter:
+            threshold: 2
+            min_length: 6
+            max_length: 80            # 重复片段（机翻垃圾常见）:contentReference[oaicite:10]{index=10
+        - LangidFilter:
+            languages: [en, zh]
+            thresholds: [0.80, 0.80]  # 你想更干净可调到 0.90 :contentReference[oaicite:5]{index=5}
+            langid_languages: [en, zh]
