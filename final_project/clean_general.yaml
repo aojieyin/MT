@@ -1,0 +1,70 @@
+common:
+  default_n_jobs: 4
+  chunksize: 200000
+
+steps:
+  # Sample 1,000,000 en-zh pairs
+  - type: subset
+    parameters:
+      inputs: [UNPC.en-zh.en, UNPC.en-zh.zh]
+      outputs: [unpc_1m.en, unpc_1m.zh]
+      size: 1000000
+      seed: 42
+
+  # Deduplication
+  - type: remove_duplicates
+    parameters:
+      inputs: [unpc_1m.en, unpc_1m.zh]
+      outputs: [unpc_1m.dedup.en, unpc_1m.dedup.zh]
+
+
+  - type: preprocess
+    parameters:
+      inputs:  [unpc_1m.dedup.en, unpc_1m.dedup.zh]
+      outputs: [unpc_1m.pre.en,   unpc_1m.pre.zh]
+      preprocessors:
+        - RegExpSub:
+            patterns:
+              # HTML entity normalization (e.g., &quot;, which are not HTML tags and therefore are typically not captured by HtmlTagFilter).
+               - ['&quot;', '"', 0, []]
+               - ['&#34;',  '"', 0, []]
+               - ['&amp;',  '&', 0, []]
+               - ['&lt;',   '<', 0, []]
+               - ['&gt;',   '>', 0, []]
+               - ['&#39;|&apos;', "'", 0, []]
+
+            # 2) Remove URL / Email（replace them with whitespace）
+               - ['\\b(?:https?://|www\\.)\\S+', ' ', 0, ["I"]]
+               - ['\\b[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}\\b', ' ', 0, ["I"]]
+
+        - WhitespaceNormalizer: {}
+
+
+  - type: filter
+    parameters:
+      inputs: [unpc_1m.pre.en, unpc_1m.pre.zh]
+      outputs: [unpc_1m.clean.en, unpc_1m.clean.zh]
+      filters:
+        - LengthFilter:
+            min_length: [5, 5]
+            max_length: [200, 400]
+            unit: [word, char]   
+        - LengthRatioFilter:
+            threshold: 5.0
+            unit: char          
+        - CharacterScoreFilter:
+            scripts: [Latin, Han]
+            thresholds: [0.80, 0.60]  
+        - HtmlTagFilter: {}           
+        - TerminalPunctuationFilter:
+            threshold: -2             
+        - NonZeroNumeralsFilter:
+            threshold: 0.5            
+        - RepetitionFilter:
+            threshold: 2
+            min_length: 6
+            max_length: 80            
+        - LangidFilter:
+            languages: [en, zh]
+            thresholds: [0.80, 0.80]  
+            langid_languages: [en, zh]
